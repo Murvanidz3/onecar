@@ -9,7 +9,7 @@ import json
 
 app = FastAPI()
 
-# 1. მივაბათ static საქაღალდე (სადაც HTML დევს)
+# 1. ვეუბნებით, რომ "static" საქაღალდე გამოიყენოს
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
@@ -24,7 +24,7 @@ class CarRequest(BaseModel):
     vin_history_text: str
     price: int
 
-# 2. მთავარ გვერდზე ("/") გავხსნათ ჩვენი index.html
+# 2. მთავარ გვერდზე ("/") ვხსნით ჩვენს HTML ფაილს
 @app.get("/")
 def read_root():
     return FileResponse('static/index.html')

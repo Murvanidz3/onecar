@@ -5,16 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Auto Detector AI 🕵️‍♂️</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background-color: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; padding: 20px; margin: 0; }
         .container { max-width: 600px; width: 100%; background: #1e1e1e; padding: 30px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-        h1 { text-align: center; color: #4CAF50; }
-        label { display: block; margin-top: 15px; color: #bbb; }
-        textarea, input { width: 100%; padding: 10px; margin-top: 5px; background: #2d2d2d; border: 1px solid #444; color: #fff; border-radius: 5px; box-sizing: border-box;}
-        button { width: 100%; margin-top: 20px; padding: 15px; background: #4CAF50; border: none; color: white; font-size: 18px; border-radius: 8px; cursor: pointer; transition: 0.3s; }
-        button:hover { background: #45a049; }
-        #result { margin-top: 20px; padding: 20px; background: #252525; border-radius: 10px; display: none; }
-        .score { font-size: 24px; font-weight: bold; text-align: center; display: block; margin-bottom: 10px; }
-        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #4CAF50; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 20px auto; display: none; }
+        h1 { text-align: center; color: #4CAF50; margin-bottom: 5px; }
+        .subtitle { text-align: center; color: #888; margin-bottom: 30px; font-size: 14px; }
+        label { display: block; margin-top: 15px; color: #bbb; font-weight: bold; }
+        textarea, input { width: 100%; padding: 12px; margin-top: 8px; background: #2d2d2d; border: 1px solid #444; color: #fff; border-radius: 8px; box-sizing: border-box; font-size: 14px; }
+        textarea:focus, input:focus { outline: none; border-color: #4CAF50; }
+        button { width: 100%; margin-top: 25px; padding: 15px; background: #4CAF50; border: none; color: white; font-size: 18px; font-weight: bold; border-radius: 8px; cursor: pointer; transition: 0.3s; }
+        button:hover { background: #45a049; transform: translateY(-2px); }
+        
+        /* შედეგების ბლოკი */
+        #result { margin-top: 30px; padding: 25px; background: #252525; border-radius: 12px; display: none; border: 1px solid #333; }
+        .score-box { text-align: center; margin-bottom: 20px; }
+        .score-val { font-size: 42px; font-weight: bold; display: block; }
+        .score-label { font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+        .verdict { text-align: center; font-size: 20px; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #444; }
+        .analysis { line-height: 1.6; color: #ddd; font-size: 15px; }
+
+        /* ანიმაცია (Loader) */
+        .loader { border: 4px solid #333; border-top: 4px solid #4CAF50; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 30px auto; display: none; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
@@ -22,25 +32,28 @@
 
 <div class="container">
     <h1>Auto Detector AI 🕵️‍♂️</h1>
-    <p style="text-align: center; color: #888;">შეამოწმე მანქანა ტყუილებზე 5 წამში</p>
+    <p class="subtitle">გაიგე სიმართლე მანქანის შესახებ 5 წამში</p>
 
-    <label>განცხადების აღწერა (MyAuto):</label>
-    <textarea id="myauto" rows="4" placeholder="მაგ: იდეალური, ჩამოვიდა დაურტყმელი..."></textarea>
+    <label>📜 განცხადების აღწერა (MyAuto):</label>
+    <textarea id="myauto" rows="4" placeholder="ჩააკოპირე ტექსტი განცხადიდან... (მაგ: იდეალური, ჩამოვიდა დაურტყმელი)"></textarea>
 
-    <label>რეალური ისტორია (VIN/Auction):</label>
-    <textarea id="history" rows="4" placeholder="მაგ: Copart: Front End damage, Airbags deployed..."></textarea>
+    <label>🌪️ რეალური ისტორია (VIN/Auction):</label>
+    <textarea id="history" rows="4" placeholder="ჩააკოპირე რეალური ისტორია... (მაგ: Copart: Front End damage, Airbags deployed)"></textarea>
 
-    <label>ფასი ($):</label>
-    <input type="number" id="price" placeholder="8500">
+    <label>💰 ფასი ($):</label>
+    <input type="number" id="price" placeholder="მაგ: 8500">
 
     <button onclick="analyze()">შეამოწმე ახლა 🚀</button>
 
     <div class="loader" id="loader"></div>
 
     <div id="result">
-        <span class="score" id="scoreVal"></span>
-        <h3 id="verdict" style="text-align: center;"></h3>
-        <p id="analysis" style="line-height: 1.6;"></p>
+        <div class="score-box">
+            <span class="score-label">ნდობის რეიტინგი</span>
+            <span class="score-val" id="scoreVal">--</span>
+        </div>
+        <h3 class="verdict" id="verdict"></h3>
+        <p class="analysis" id="analysis"></p>
     </div>
 </div>
 
@@ -50,34 +63,52 @@
         const history = document.getElementById('history').value;
         const price = document.getElementById('price').value;
         
-        if(!myauto || !history || !price) { alert("შეავსე ყველა ველი!"); return; }
+        // ვალიდაცია
+        if(!myauto || !history || !price) { 
+            alert("გთხოვთ შეავსოთ ყველა ველი! ⚠️"); 
+            return; 
+        }
 
+        // ანიმაციის ჩართვა
         document.getElementById('loader').style.display = 'block';
         document.getElementById('result').style.display = 'none';
-
+        
         try {
+            // ვაგზავნით მონაცემებს შენს Python სერვერზე
             const response = await fetch('/analyze', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ myauto_text: myauto, vin_history_text: history, price: parseInt(price) })
+                body: JSON.stringify({ 
+                    myauto_text: myauto, 
+                    vin_history_text: history, 
+                    price: parseInt(price) 
+                })
             });
             
             const data = await response.json();
             
+            // ანიმაციის გამორთვა
             document.getElementById('loader').style.display = 'none';
             document.getElementById('result').style.display = 'block';
             
-            // ფერების შეცვლა ქულის მიხედვით
+            // ფერების ლოგიკა
             const score = data.score || 0;
-            const color = score < 40 ? '#ff4444' : (score < 70 ? '#ffbb33' : '#00C851');
+            let color = '#ff4444'; // წითელი (ცუდი)
+            if(score >= 40) color = '#ffbb33'; // ყვითელი (საშუალო)
+            if(score >= 75) color = '#00C851'; // მწვანე (კარგი)
             
-            document.getElementById('scoreVal').innerHTML = `ნდობის რეიტინგი: <span style="color:${color}">${score}/100</span>`;
+            // მონაცემების ჩაწერა
+            const scoreEl = document.getElementById('scoreVal');
+            scoreEl.innerText = `${score}/100`;
+            scoreEl.style.color = color;
+            
             document.getElementById('verdict').innerText = data.verdict;
+            document.getElementById('verdict').style.color = color;
             document.getElementById('analysis').innerText = data.analysis;
 
         } catch (error) {
             console.error(error);
-            alert("შეცდომა! სცადეთ თავიდან.");
+            alert("დაფიქსირდა შეცდომა! სცადეთ თავიდან.");
             document.getElementById('loader').style.display = 'none';
         }
     }
