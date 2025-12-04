@@ -9,19 +9,35 @@
         .container { max-width: 600px; width: 100%; background: #1e1e1e; padding: 30px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
         h1 { text-align: center; color: #4CAF50; margin-bottom: 5px; }
         .subtitle { text-align: center; color: #888; margin-bottom: 30px; font-size: 14px; }
-        label { display: block; margin-top: 15px; color: #bbb; font-weight: bold; }
-        textarea, input { width: 100%; padding: 12px; margin-top: 8px; background: #2d2d2d; border: 1px solid #444; color: #fff; border-radius: 8px; box-sizing: border-box; font-size: 14px; }
+        
+        /* სექციების სტილები */
+        .section-box { background: #252525; padding: 20px; border-radius: 10px; border: 1px solid #333; margin-bottom: 20px; }
+        .section-title { font-size: 16px; font-weight: bold; margin-bottom: 15px; display: block; color: #ddd; border-bottom: 1px solid #444; padding-bottom: 5px; }
+
+        label { display: block; margin-top: 15px; color: #bbb; font-size: 13px; }
+        textarea, input { width: 100%; padding: 12px; margin-top: 5px; background: #2d2d2d; border: 1px solid #444; color: #fff; border-radius: 8px; box-sizing: border-box; font-size: 14px; }
         textarea:focus, input:focus { outline: none; border-color: #4CAF50; }
-        button { width: 100%; margin-top: 25px; padding: 15px; background: #4CAF50; border: none; color: white; font-size: 18px; font-weight: bold; border-radius: 8px; cursor: pointer; transition: 0.3s; }
-        button:hover { background: #45a049; transform: translateY(-2px); }
+        
+        /* ღილაკები */
+        button { width: 100%; padding: 12px; border: none; color: white; font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; transition: 0.3s; margin-top: 15px; }
+        .btn-link { background: #2196F3; } /* ლურჯი ღილაკი ლინკისთვის */
+        .btn-link:hover { background: #1976D2; }
+        .btn-manual { background: #4CAF50; } /* მწვანე ღილაკი ხელით შემოწმებისთვის */
+        .btn-manual:hover { background: #45a049; }
+
+        /* გამყოფი ხაზი */
+        .divider { text-align: center; margin: 20px 0; color: #555; font-size: 12px; position: relative; }
+        .divider::before, .divider::after { content: ""; position: absolute; top: 50%; width: 40%; height: 1px; background: #333; }
+        .divider::before { left: 0; }
+        .divider::after { right: 0; }
         
         /* შედეგების ბლოკი */
-        #result { margin-top: 30px; padding: 25px; background: #252525; border-radius: 12px; display: none; border: 1px solid #333; }
+        #result { margin-top: 30px; padding: 25px; background: #252525; border-radius: 12px; display: none; border: 1px solid #4CAF50; }
         .score-box { text-align: center; margin-bottom: 20px; }
         .score-val { font-size: 42px; font-weight: bold; display: block; }
         .score-label { font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
         .verdict { text-align: center; font-size: 20px; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #444; }
-        .analysis { line-height: 1.6; color: #ddd; font-size: 15px; }
+        .analysis { line-height: 1.6; color: #ddd; font-size: 15px; white-space: pre-wrap; }
 
         /* ანიმაცია (Loader) */
         .loader { border: 4px solid #333; border-top: 4px solid #4CAF50; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 30px auto; display: none; }
@@ -34,16 +50,29 @@
     <h1>Auto Detector AI 🕵️‍♂️</h1>
     <p class="subtitle">გაიგე სიმართლე მანქანის შესახებ 5 წამში</p>
 
-    <label>📜 განცხადების აღწერა (MyAuto):</label>
-    <textarea id="myauto" rows="4" placeholder="ჩააკოპირე ტექსტი განცხადიდან... (მაგ: იდეალური, ჩამოვიდა დაურტყმელი)"></textarea>
+    <div class="section-box" style="border-color: #2196F3;">
+        <span class="section-title" style="color: #2196F3;">🔗 სწრაფი შემოწმება (MyAuto)</span>
+        <label>ჩასვით განცხადების ლინკი:</label>
+        <input type="text" id="linkInput" placeholder="https://www.myauto.ge/ka/pr/...">
+        <button class="btn-link" onclick="analyzeLink()">ლინკით შემოწმება 🚀</button>
+    </div>
 
-    <label>🌪️ რეალური ისტორია (VIN/Auction):</label>
-    <textarea id="history" rows="4" placeholder="ჩააკოპირე რეალური ისტორია... (მაგ: Copart: Front End damage, Airbags deployed)"></textarea>
+    <div class="divider">ან შეავსეთ ხელით</div>
 
-    <label>💰 ფასი ($):</label>
-    <input type="number" id="price" placeholder="მაგ: 8500">
+    <div class="section-box">
+        <span class="section-title" style="color: #4CAF50;">📝 დეტალური შემოწმება</span>
+        
+        <label>განცხადების აღწერა (MyAuto):</label>
+        <textarea id="myauto" rows="3" placeholder="მაგ: იდეალური, ჩამოვიდა დაურტყმელი..."></textarea>
 
-    <button onclick="analyze()">შეამოწმე ახლა 🚀</button>
+        <label>რეალური ისტორია (VIN/Auction):</label>
+        <textarea id="history" rows="3" placeholder="მაგ: Copart: Front End damage..."></textarea>
+
+        <label>ფასი ($):</label>
+        <input type="number" id="price" placeholder="8500">
+
+        <button class="btn-manual" onclick="analyzeManual()">ხელით შემოწმება 🕵️‍♂️</button>
+    </div>
 
     <div class="loader" id="loader"></div>
 
@@ -58,23 +87,72 @@
 </div>
 
 <script>
-    async function analyze() {
+    // დამხმარე ფუნქცია შედეგების გამოსაჩენად
+    function showResult(data) {
+        document.getElementById('loader').style.display = 'none';
+        
+        if (data.error) {
+            alert("შეცდომა: " + data.error);
+            return;
+        }
+
+        document.getElementById('result').style.display = 'block';
+
+        const score = data.score || 0;
+        let color = '#ff4444'; // წითელი
+        if(score >= 40) color = '#ffbb33'; // ყვითელი
+        if(score >= 75) color = '#00C851'; // მწვანე
+        
+        const scoreEl = document.getElementById('scoreVal');
+        scoreEl.innerText = `${score}/100`;
+        scoreEl.style.color = color;
+        
+        document.getElementById('verdict').innerText = data.verdict;
+        document.getElementById('verdict').style.color = color;
+        document.getElementById('analysis').innerText = data.analysis;
+        
+        // სქროლი შედეგებამდე
+        document.getElementById('result').scrollIntoView({behavior: "smooth"});
+    }
+
+    // ფუნქცია 1: ლინკით შემოწმება
+    async function analyzeLink() {
+        const link = document.getElementById('linkInput').value;
+        if(!link) { alert("გთხოვთ ჩასვათ ლინკი!"); return; }
+
+        document.getElementById('loader').style.display = 'block';
+        document.getElementById('result').style.display = 'none';
+
+        try {
+            const response = await fetch('/scrape_and_analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: link })
+            });
+            const data = await response.json();
+            showResult(data);
+        } catch (error) {
+            console.error(error);
+            alert("სერვერთან დაკავშირების პრობლემა.");
+            document.getElementById('loader').style.display = 'none';
+        }
+    }
+
+    // ფუნქცია 2: ხელით შემოწმება
+    async function analyzeManual() {
         const myauto = document.getElementById('myauto').value;
         const history = document.getElementById('history').value;
         const price = document.getElementById('price').value;
         
-        // ვალიდაცია
         if(!myauto || !history || !price) { 
-            alert("გთხოვთ შეავსოთ ყველა ველი! ⚠️"); 
+            alert("გთხოვთ შეავსოთ ყველა ველი!"); 
             return; 
         }
 
-        // ანიმაციის ჩართვა
         document.getElementById('loader').style.display = 'block';
         document.getElementById('result').style.display = 'none';
         
         try {
-            // ვაგზავნით მონაცემებს შენს Python სერვერზე
             const response = await fetch('/analyze', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -84,31 +162,11 @@
                     price: parseInt(price) 
                 })
             });
-            
             const data = await response.json();
-            
-            // ანიმაციის გამორთვა
-            document.getElementById('loader').style.display = 'none';
-            document.getElementById('result').style.display = 'block';
-            
-            // ფერების ლოგიკა
-            const score = data.score || 0;
-            let color = '#ff4444'; // წითელი (ცუდი)
-            if(score >= 40) color = '#ffbb33'; // ყვითელი (საშუალო)
-            if(score >= 75) color = '#00C851'; // მწვანე (კარგი)
-            
-            // მონაცემების ჩაწერა
-            const scoreEl = document.getElementById('scoreVal');
-            scoreEl.innerText = `${score}/100`;
-            scoreEl.style.color = color;
-            
-            document.getElementById('verdict').innerText = data.verdict;
-            document.getElementById('verdict').style.color = color;
-            document.getElementById('analysis').innerText = data.analysis;
-
+            showResult(data);
         } catch (error) {
             console.error(error);
-            alert("დაფიქსირდა შეცდომა! სცადეთ თავიდან.");
+            alert("სერვერთან დაკავშირების პრობლემა.");
             document.getElementById('loader').style.display = 'none';
         }
     }

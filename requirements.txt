@@ -2,3 +2,5 @@ fastapi
 uvicorn
 google-generativeai
 pydantic
+requests
+beautifulsoup4
