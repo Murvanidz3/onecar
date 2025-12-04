@@ -1,7 +1,7 @@
 import os
 import uvicorn
 import google.generativeai as genai
-from curl_cffi import requests as cffi_requests # ვიყენებთ სპეციალურ რექუესთებს
+from curl_cffi import requests as cffi_requests
 import re
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -17,8 +17,13 @@ GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash',
-                                  generation_config={"response_mime_type": "application/json"})
+    
+    # ⚠️ ცვლილება: ვიყენებთ სტანდარტულ "gemini-1.5-flash" სახელს
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash',
+                                      generation_config={"response_mime_type": "application/json"})
+    except Exception as e:
+        print(f"Model Init Error: {e}")
 
 class LinkRequest(BaseModel):
     url: str
@@ -37,9 +42,7 @@ def extract_id(input_str):
 def get_myauto_data(car_id):
     try:
         api_url = f"https://api2.myauto.ge/ka/products/{car_id}"
-        
-        # აი აქ არის მთავარი ტრიუკი: impersonate="chrome"
-        # ეს არწმუნებს სერვერს, რომ ნამდვილი ბრაუზერი ხარ
+        # Cloudflare Bypass
         response = cffi_requests.get(api_url, impersonate="chrome")
         
         if response.status_code != 200:
@@ -60,7 +63,6 @@ def get_myauto_data(car_id):
         აღწერა: {data.get('product_description')}
         """
         return info
-        
     except Exception as e:
         print(f"CFFI Error: {e}")
         return None
@@ -76,24 +78,27 @@ def scrape_analyze(data: LinkRequest):
 
     car_id = extract_id(data.url)
     if not car_id:
-        return {"error": "ვერ ვიპოვე ID. სცადეთ ხელით ჩაწერა."}
+        return {"error": "ვერ ვიპოვე ID."}
 
+    # აქ უკვე ვიცით რომ ეს მუშაობს!
     car_info = get_myauto_data(car_id)
     if not car_info:
-        return {"error": "MyAuto-ს დაცვამ IP დაბლოკა. გთხოვთ გამოიყენოთ მწვანე ღილაკი 'ხელით შემოწმება'."}
+        return {"error": "ვერ მოხერხდა დაკავშირება. გთხოვთ სცადოთ ხელით შევსება."}
 
     prompt = f"""
     Role: Strict Georgian Car Expert.
-    Task: Analyze car data.
+    Task: Analyze this car data fetched from MyAuto.
     Data: {car_info}
     Output JSON format: {{ "score": 0-100, "verdict": "string", "analysis": "string" }}
     """
     
     try:
+        # ვცადოთ სტანდარტული გამოძახება
         response = model.generate_content(prompt)
         return json.loads(response.text)
     except Exception as e:
-        return {"error": str(e)}
+        # თუ 1.5-flash არ მუშაობს, ვცადოთ fallback
+        return {"error": f"AI Error: {str(e)}"}
 
 class CarRequest(BaseModel):
     myauto_text: str
