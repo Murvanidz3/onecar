@@ -2,37 +2,38 @@ import os
 import uvicorn
 import google.generativeai as genai
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import json
 
 app = FastAPI()
 
-# გარემოს ცვლადების წაკითხვა
+# 1. მივაბათ static საქაღალდე (სადაც HTML დევს)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
-    # ვიყენებთ JSON რეჟიმს სტაბილურობისთვის
     model = genai.GenerativeModel('gemini-1.5-flash',
                                   generation_config={"response_mime_type": "application/json"})
-else:
-    print("Warning: GOOGLE_API_KEY not found!")
 
 class CarRequest(BaseModel):
     myauto_text: str
     vin_history_text: str
     price: int
 
+# 2. მთავარ გვერდზე ("/") გავხსნათ ჩვენი index.html
 @app.get("/")
-def home():
-    return {"message": "Auto Detector API is running!"}
+def read_root():
+    return FileResponse('static/index.html')
 
 @app.post("/analyze")
 def analyze_car(data: CarRequest):
     if not GOOGLE_API_KEY:
         return {"error": "API Key not configured"}
 
-    # პრომპტს ვამატებთ ინსტრუქციას: "უპასუხე ქართულად"
     prompt = f"""
     Role: Strict Georgian Car Expert.
     Task: Analyze car listing vs real history.
