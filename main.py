@@ -1,7 +1,7 @@
 import os
 import uvicorn
 import google.generativeai as genai
-import requests
+import cloudscraper
 import re
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -21,59 +21,52 @@ if GOOGLE_API_KEY:
                                   generation_config={"response_mime_type": "application/json"})
 
 class LinkRequest(BaseModel):
-    url: str # აქ შეიძლება იყოს ლინკიც და ID-იც
+    url: str
 
-# დამხმარე ფუნქცია ID-ის ამოსაღებად
 def extract_id(input_str):
-    # თუ პირდაპირ ციფრებია (მაგ: 119361637)
+    # თუ პირდაპირ ციფრებია
     if input_str.isdigit():
         return input_str
-    
-    # თუ ლინკია (მაგ: myauto.ge/ka/pr/119361637/...)
+    # თუ ლინკია
     match = re.search(r'/pr/(\d+)', input_str)
     if match:
         return match.group(1)
-    
-    # სხვა შემთხვევაში ვეძებთ ნებისმიერ გრძელ ციფრს
     match = re.search(r'(\d{8,})', input_str)
     if match:
         return match.group(1)
-        
     return None
 
+# აქ შევცვალეთ ლოგიკა: ვიყენებთ cloudscraper-ს
 def get_myauto_data(car_id):
     try:
-        # მივმართავთ პირდაპირ API-ს (საიდუმლო კარი)
         api_url = f"https://api2.myauto.ge/ka/products/{car_id}"
         
-        # User-Agent აუცილებელია, რომ არ დაგვბლოკონ
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        
-        response = requests.get(api_url, headers=headers)
+        # ვქმნით სკრაპერს, რომელიც Cloudflare-ს უვლის გვერდს
+        scraper = cloudscraper.create_scraper() 
+        response = scraper.get(api_url)
         
         if response.status_code != 200:
+            print(f"Status Code: {response.status_code}")
             return None
             
         data = response.json().get('data', {})
-        
         if not data:
             return None
 
-        # ვაგროვებთ საჭირო ინფოს სუფთად
+        # მონაცემების შეგროვება
         info = f"""
-        მანქანა: {data.get('man_id')} {data.get('mod_id')} (წელი: {data.get('prod_year')})
+        მანქანა: {data.get('man_id')} {data.get('mod_id')}
+        წელი: {data.get('prod_year')}
         ფასი: {data.get('price_usd', 0)}$
         გარბენი: {data.get('car_run_km')} კმ
         ძრავი: {data.get('engine_volume')}
-        აღწერა: {data.get('product_description')}
         განბაჟება: {data.get('customs_passed')}
+        აღწერა: {data.get('product_description')}
         """
         return info
         
     except Exception as e:
-        print(f"API Error: {e}")
+        print(f"Scraper Error: {e}")
         return None
 
 @app.get("/")
@@ -85,28 +78,20 @@ def scrape_analyze(data: LinkRequest):
     if not GOOGLE_API_KEY:
         return {"error": "API Key not configured"}
 
-    # 1. ვიღებთ ID-ს
     car_id = extract_id(data.url)
     if not car_id:
-        return {"error": "ვერ ვიპოვე ID ლინკში. სცადეთ ხელით ჩაწერა."}
+        return {"error": "ვერ ვიპოვე ID. სცადეთ ხელით ჩაწერა."}
 
-    # 2. ვიღებთ ინფოს API-დან
     car_info = get_myauto_data(car_id)
     if not car_info:
-        return {"error": "MyAuto-ს API არ პასუხობს. სცადეთ მოგვიანებით."}
+        # თუ მაინც დაიბლოკა, ვეუბნებით რომ ხელით შეავსონ
+        return {"error": "MyAuto-მ დაბლოკა კავშირი. გთხოვთ გამოიყენოთ 'დეტალური შემოწმება' (ხელით შევსება)."}
 
-    # 3. ვაანალიზებთ AI-ით
     prompt = f"""
     Role: Strict Georgian Car Expert.
-    Task: Analyze this car data fetched from MyAuto API.
-    
-    Car Data: {car_info}
-    
-    Output JSON format: {{ 
-        "score": 0-100, 
-        "verdict": "string (Georgian)", 
-        "analysis": "string (Georgian - detailed analysis)",
-    }}
+    Task: Analyze car data.
+    Data: {car_info}
+    Output JSON format: {{ "score": 0-100, "verdict": "string", "analysis": "string" }}
     """
     
     try:
@@ -115,7 +100,7 @@ def scrape_analyze(data: LinkRequest):
     except Exception as e:
         return {"error": str(e)}
 
-# ძველი ფუნქცია (ხელით შესავსები)
+# ძველი ფუნქცია (Manual)
 class CarRequest(BaseModel):
     myauto_text: str
     vin_history_text: str
@@ -125,12 +110,11 @@ class CarRequest(BaseModel):
 def analyze_car(data: CarRequest):
     if not GOOGLE_API_KEY:
         return {"error": "API Key not configured"}
-
     prompt = f"""
     Role: Strict Georgian Car Expert.
     Listing: {data.myauto_text}
-    Price: {data.price} USD
-    Real History: {data.vin_history_text}
+    Price: {data.price}
+    History: {data.vin_history_text}
     Output JSON format: {{ "score": 0-100, "verdict": "string", "analysis": "string" }}
     """
     try:
