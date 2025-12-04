@@ -15,18 +15,38 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
+# აქ არ ვუთითებთ კონკრეტულ მოდელს, რომ არ "გაკრაშოს" დასაწყისშივე
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
-    
-    # ⚠️ ცვლილება: ვიყენებთ სტანდარტულ "gemini-1.5-flash" სახელს
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash',
-                                      generation_config={"response_mime_type": "application/json"})
-    except Exception as e:
-        print(f"Model Init Error: {e}")
 
 class LinkRequest(BaseModel):
     url: str
+
+# --- სადიაგნოსტიკო ფუნქცია (მთავარი ხსნა) ---
+@app.get("/check_models")
+def check_models_availability():
+    if not GOOGLE_API_KEY:
+        return {"status": "ERROR", "message": "API Key ვერ ვიპოვე Render-ში"}
+    
+    try:
+        model_list = []
+        # ვთხოვთ Google-ს ყველა მოდელის სიას
+        for m in genai.list_models():
+            model_list.append(m.name)
+            
+        return {
+            "status": "SUCCESS", 
+            "your_key_is_working": True,
+            "available_models": model_list
+        }
+    except Exception as e:
+        return {
+            "status": "CRITICAL ERROR", 
+            "message": str(e),
+            "hint": "თუ აქ 400/403 ერორია, ესეიგი API Key არასწორია ან დაბლოკილი."
+        }
+
+# --- დანარჩენი კოდი ---
 
 def extract_id(input_str):
     if input_str.isdigit():
@@ -42,30 +62,12 @@ def extract_id(input_str):
 def get_myauto_data(car_id):
     try:
         api_url = f"https://api2.myauto.ge/ka/products/{car_id}"
-        # Cloudflare Bypass
         response = cffi_requests.get(api_url, impersonate="chrome")
-        
-        if response.status_code != 200:
-            print(f"Status blocked: {response.status_code}")
-            return None
-            
+        if response.status_code != 200: return None
         data = response.json().get('data', {})
-        if not data:
-            return None
-
-        info = f"""
-        მანქანა: {data.get('man_id')} {data.get('mod_id')}
-        წელი: {data.get('prod_year')}
-        ფასი: {data.get('price_usd', 0)}$
-        გარბენი: {data.get('car_run_km')} კმ
-        ძრავი: {data.get('engine_volume')}
-        განბაჟება: {data.get('customs_passed')}
-        აღწერა: {data.get('product_description')}
-        """
-        return info
-    except Exception as e:
-        print(f"CFFI Error: {e}")
-        return None
+        if not data: return None
+        return f"მანქანა: {data.get('man_id')} {data.get('mod_id')}, წელი: {data.get('prod_year')}, გარბენი: {data.get('car_run_km')}კმ, აღწერა: {data.get('product_description')}"
+    except: return None
 
 @app.get("/")
 def read_root():
@@ -73,54 +75,22 @@ def read_root():
 
 @app.post("/scrape_and_analyze")
 def scrape_analyze(data: LinkRequest):
-    if not GOOGLE_API_KEY:
-        return {"error": "API Key not configured"}
-
-    car_id = extract_id(data.url)
-    if not car_id:
-        return {"error": "ვერ ვიპოვე ID."}
-
-    # აქ უკვე ვიცით რომ ეს მუშაობს!
-    car_info = get_myauto_data(car_id)
-    if not car_info:
-        return {"error": "ვერ მოხერხდა დაკავშირება. გთხოვთ სცადოთ ხელით შევსება."}
-
-    prompt = f"""
-    Role: Strict Georgian Car Expert.
-    Task: Analyze this car data fetched from MyAuto.
-    Data: {car_info}
-    Output JSON format: {{ "score": 0-100, "verdict": "string", "analysis": "string" }}
-    """
+    if not GOOGLE_API_KEY: return {"error": "API Key missing"}
     
+    car_id = extract_id(data.url)
+    if not car_id: return {"error": "ID ვერ ვიპოვე"}
+    
+    car_info = get_myauto_data(car_id)
+    if not car_info: return {"error": "MyAuto დაბლოკილია"}
+
+    # აქ ვიყენებთ gemini-pro-ს, მაგრამ ჯერ დიაგნოსტიკაა მთავარი
     try:
-        # ვცადოთ სტანდარტული გამოძახება
-        response = model.generate_content(prompt)
-        return json.loads(response.text)
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(f"Analyze: {car_info}. Output JSON.")
+        text = response.text.replace('```json', '').replace('```', '')
+        return json.loads(text)
     except Exception as e:
-        # თუ 1.5-flash არ მუშაობს, ვცადოთ fallback
         return {"error": f"AI Error: {str(e)}"}
-
-class CarRequest(BaseModel):
-    myauto_text: str
-    vin_history_text: str
-    price: int
-
-@app.post("/analyze")
-def analyze_car(data: CarRequest):
-    if not GOOGLE_API_KEY:
-        return {"error": "API Key not configured"}
-    prompt = f"""
-    Role: Strict Georgian Car Expert.
-    Listing: {data.myauto_text}
-    Price: {data.price}
-    History: {data.vin_history_text}
-    Output JSON format: {{ "score": 0-100, "verdict": "string", "analysis": "string" }}
-    """
-    try:
-        response = model.generate_content(prompt)
-        return json.loads(response.text)
-    except Exception as e:
-        return {"error": str(e)}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
