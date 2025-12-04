@@ -17,21 +17,16 @@ GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
-    # ცვლილება 1: გადავედით "gemini-pro"-ზე და წავშალეთ json კონფიგურაცია
+    
+    # ⚠️ ცვლილება: ვიყენებთ სტანდარტულ "gemini-1.5-flash" სახელს
     try:
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-1.5-flash',
+                                      generation_config={"response_mime_type": "application/json"})
     except Exception as e:
         print(f"Model Init Error: {e}")
 
 class LinkRequest(BaseModel):
     url: str
-
-# დამხმარე ფუნქცია: AI-ს პასუხის გასასუფთავებლად (Markdown-ის მოშორება)
-def clean_json_text(text):
-    # შლის ```json და ``` სიმბოლოებს
-    text = re.sub(r'```json\s*', '', text)
-    text = re.sub(r'```\s*', '', text)
-    return text.strip()
 
 def extract_id(input_str):
     if input_str.isdigit():
@@ -47,9 +42,11 @@ def extract_id(input_str):
 def get_myauto_data(car_id):
     try:
         api_url = f"https://api2.myauto.ge/ka/products/{car_id}"
+        # Cloudflare Bypass
         response = cffi_requests.get(api_url, impersonate="chrome")
         
         if response.status_code != 200:
+            print(f"Status blocked: {response.status_code}")
             return None
             
         data = response.json().get('data', {})
@@ -67,7 +64,7 @@ def get_myauto_data(car_id):
         """
         return info
     except Exception as e:
-        print(f"Scraper Error: {e}")
+        print(f"CFFI Error: {e}")
         return None
 
 @app.get("/")
@@ -83,31 +80,24 @@ def scrape_analyze(data: LinkRequest):
     if not car_id:
         return {"error": "ვერ ვიპოვე ID."}
 
+    # აქ უკვე ვიცით რომ ეს მუშაობს!
     car_info = get_myauto_data(car_id)
     if not car_info:
         return {"error": "ვერ მოხერხდა დაკავშირება. გთხოვთ სცადოთ ხელით შევსება."}
 
-    # ცვლილება 2: პრომპტში მკაცრად ვთხოვთ JSON-ს
     prompt = f"""
-    You are a strict Georgian Car Expert.
-    Analyze this car data from MyAuto.
-    
+    Role: Strict Georgian Car Expert.
+    Task: Analyze this car data fetched from MyAuto.
     Data: {car_info}
-    
-    Output ONLY valid JSON (no markdown, no extra text) with these keys:
-    {{
-        "score": 0-100, 
-        "verdict": "short georgian verdict", 
-        "analysis": "detailed georgian analysis"
-    }}
+    Output JSON format: {{ "score": 0-100, "verdict": "string", "analysis": "string" }}
     """
     
     try:
+        # ვცადოთ სტანდარტული გამოძახება
         response = model.generate_content(prompt)
-        # ცვლილება 3: ვასუფთავებთ პასუხს
-        clean_text = clean_json_text(response.text)
-        return json.loads(clean_text)
+        return json.loads(response.text)
     except Exception as e:
+        # თუ 1.5-flash არ მუშაობს, ვცადოთ fallback
         return {"error": f"AI Error: {str(e)}"}
 
 class CarRequest(BaseModel):
@@ -119,20 +109,16 @@ class CarRequest(BaseModel):
 def analyze_car(data: CarRequest):
     if not GOOGLE_API_KEY:
         return {"error": "API Key not configured"}
-        
     prompt = f"""
-    You are a strict Georgian Car Expert.
-    Analyze listing: {data.myauto_text}
+    Role: Strict Georgian Car Expert.
+    Listing: {data.myauto_text}
     Price: {data.price}
     History: {data.vin_history_text}
-    
-    Output ONLY valid JSON:
-    {{ "score": 0-100, "verdict": "geo string", "analysis": "geo string" }}
+    Output JSON format: {{ "score": 0-100, "verdict": "string", "analysis": "string" }}
     """
     try:
         response = model.generate_content(prompt)
-        clean_text = clean_json_text(response.text)
-        return json.loads(clean_text)
+        return json.loads(response.text)
     except Exception as e:
         return {"error": str(e)}
 
