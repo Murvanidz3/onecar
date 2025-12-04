@@ -4,4 +4,4 @@ google-generativeai
 pydantic
 requests
 beautifulsoup4
-cloudscraper
+curl_cffi

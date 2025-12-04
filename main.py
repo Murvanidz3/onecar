@@ -1,7 +1,7 @@
 import os
 import uvicorn
 import google.generativeai as genai
-import cloudscraper
+from curl_cffi import requests as cffi_requests # ვიყენებთ სპეციალურ რექუესთებს
 import re
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -24,10 +24,8 @@ class LinkRequest(BaseModel):
     url: str
 
 def extract_id(input_str):
-    # თუ პირდაპირ ციფრებია
     if input_str.isdigit():
         return input_str
-    # თუ ლინკია
     match = re.search(r'/pr/(\d+)', input_str)
     if match:
         return match.group(1)
@@ -36,24 +34,22 @@ def extract_id(input_str):
         return match.group(1)
     return None
 
-# აქ შევცვალეთ ლოგიკა: ვიყენებთ cloudscraper-ს
 def get_myauto_data(car_id):
     try:
         api_url = f"https://api2.myauto.ge/ka/products/{car_id}"
         
-        # ვქმნით სკრაპერს, რომელიც Cloudflare-ს უვლის გვერდს
-        scraper = cloudscraper.create_scraper() 
-        response = scraper.get(api_url)
+        # აი აქ არის მთავარი ტრიუკი: impersonate="chrome"
+        # ეს არწმუნებს სერვერს, რომ ნამდვილი ბრაუზერი ხარ
+        response = cffi_requests.get(api_url, impersonate="chrome")
         
         if response.status_code != 200:
-            print(f"Status Code: {response.status_code}")
+            print(f"Status blocked: {response.status_code}")
             return None
             
         data = response.json().get('data', {})
         if not data:
             return None
 
-        # მონაცემების შეგროვება
         info = f"""
         მანქანა: {data.get('man_id')} {data.get('mod_id')}
         წელი: {data.get('prod_year')}
@@ -66,7 +62,7 @@ def get_myauto_data(car_id):
         return info
         
     except Exception as e:
-        print(f"Scraper Error: {e}")
+        print(f"CFFI Error: {e}")
         return None
 
 @app.get("/")
@@ -84,8 +80,7 @@ def scrape_analyze(data: LinkRequest):
 
     car_info = get_myauto_data(car_id)
     if not car_info:
-        # თუ მაინც დაიბლოკა, ვეუბნებით რომ ხელით შეავსონ
-        return {"error": "MyAuto-მ დაბლოკა კავშირი. გთხოვთ გამოიყენოთ 'დეტალური შემოწმება' (ხელით შევსება)."}
+        return {"error": "MyAuto-ს დაცვამ IP დაბლოკა. გთხოვთ გამოიყენოთ მწვანე ღილაკი 'ხელით შემოწმება'."}
 
     prompt = f"""
     Role: Strict Georgian Car Expert.
@@ -100,7 +95,6 @@ def scrape_analyze(data: LinkRequest):
     except Exception as e:
         return {"error": str(e)}
 
-# ძველი ფუნქცია (Manual)
 class CarRequest(BaseModel):
     myauto_text: str
     vin_history_text: str
