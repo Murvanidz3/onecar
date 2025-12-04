@@ -2,8 +2,8 @@ import os
 import uvicorn
 import google.generativeai as genai
 import requests
-from bs4 import BeautifulSoup
-from fastapi import FastAPI, HTTPException
+import re
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -20,68 +20,92 @@ if GOOGLE_API_KEY:
     model = genai.GenerativeModel('gemini-1.5-flash',
                                   generation_config={"response_mime_type": "application/json"})
 
-# 1. ახალი მოთხოვნა: მომხმარებელი აგზავნის ლინკს (URL)
 class LinkRequest(BaseModel):
-    url: str
+    url: str # აქ შეიძლება იყოს ლინკიც და ID-იც
 
-# 2. სკრაპინგის ფუნქცია (MyAuto-დან ინფორმაციის წამოღება)
-def scrape_myauto(url):
+# დამხმარე ფუნქცია ID-ის ამოსაღებად
+def extract_id(input_str):
+    # თუ პირდაპირ ციფრებია (მაგ: 119361637)
+    if input_str.isdigit():
+        return input_str
+    
+    # თუ ლინკია (მაგ: myauto.ge/ka/pr/119361637/...)
+    match = re.search(r'/pr/(\d+)', input_str)
+    if match:
+        return match.group(1)
+    
+    # სხვა შემთხვევაში ვეძებთ ნებისმიერ გრძელ ციფრს
+    match = re.search(r'(\d{8,})', input_str)
+    if match:
+        return match.group(1)
+        
+    return None
+
+def get_myauto_data(car_id):
     try:
-        # თავს ვაჩვენებთ როგორც ნამდვილი ბრაუზერი (User-Agent)
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-        response = requests.get(url, headers=headers)
+        # მივმართავთ პირდაპირ API-ს (საიდუმლო კარი)
+        api_url = f"https://api2.myauto.ge/ka/products/{car_id}"
+        
+        # User-Agent აუცილებელია, რომ არ დაგვბლოკონ
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(api_url, headers=headers)
         
         if response.status_code != 200:
             return None
+            
+        data = response.json().get('data', {})
+        
+        if not data:
+            return None
 
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        # ვეძებთ აღწერას (MyAuto-ს სტრუქტურა იცვლება, ეს არის სავარაუდო კლასები)
-        # ვცდილობთ ვიპოვოთ აღწერის ტექსტი
-        description = ""
-        desc_div = soup.find('div', class_='product-desc') # ძველი დიზაინი
-        if not desc_div:
-            # ვცადოთ მეტა ტეგი (უფრო საიმედოა)
-            meta_desc = soup.find('meta', property='og:description')
-            if meta_desc:
-                description = meta_desc.get('content', '')
-        else:
-            description = desc_div.get_text(strip=True)
-
-        return description
+        # ვაგროვებთ საჭირო ინფოს სუფთად
+        info = f"""
+        მანქანა: {data.get('man_id')} {data.get('mod_id')} (წელი: {data.get('prod_year')})
+        ფასი: {data.get('price_usd', 0)}$
+        გარბენი: {data.get('car_run_km')} კმ
+        ძრავი: {data.get('engine_volume')}
+        აღწერა: {data.get('product_description')}
+        განბაჟება: {data.get('customs_passed')}
+        """
+        return info
+        
     except Exception as e:
-        print(f"Scraping Error: {e}")
+        print(f"API Error: {e}")
         return None
 
 @app.get("/")
 def read_root():
     return FileResponse('static/index.html')
 
-# 3. ახალი API: ლინკის დამუშავება
 @app.post("/scrape_and_analyze")
 def scrape_analyze(data: LinkRequest):
     if not GOOGLE_API_KEY:
         return {"error": "API Key not configured"}
 
-    # ნაბიჯი A: ინფორმაციის წამოღება ლინკიდან
-    scraped_text = scrape_myauto(data.url)
-    
-    if not scraped_text:
-        return {"error": "ვერ მოხერხდა ინფორმაციის წამოღება ლინკიდან. სცადეთ ტექსტის ხელით ჩაწერა."}
+    # 1. ვიღებთ ID-ს
+    car_id = extract_id(data.url)
+    if not car_id:
+        return {"error": "ვერ ვიპოვე ID ლინკში. სცადეთ ხელით ჩაწერა."}
 
-    # ნაბიჯი B: AI ანალიზი (ჯერჯერობით ისტორიის გარეშე, მარტო განცხადებას ვაფასებთ)
+    # 2. ვიღებთ ინფოს API-დან
+    car_info = get_myauto_data(car_id)
+    if not car_info:
+        return {"error": "MyAuto-ს API არ პასუხობს. სცადეთ მოგვიანებით."}
+
+    # 3. ვაანალიზებთ AI-ით
     prompt = f"""
     Role: Strict Georgian Car Expert.
-    Task: Analyze this car listing text from MyAuto.
-    Look for hidden meanings (e.g., "requires hand" means broken).
+    Task: Analyze this car data fetched from MyAuto API.
     
-    Listing Text: {scraped_text}
+    Car Data: {car_info}
     
     Output JSON format: {{ 
         "score": 0-100, 
         "verdict": "string (Georgian)", 
-        "analysis": "string (Georgian - explain pros and cons based on text)",
-        "scraped_info": "{scraped_text[:100]}..." 
+        "analysis": "string (Georgian - detailed analysis)",
     }}
     """
     
@@ -91,7 +115,7 @@ def scrape_analyze(data: LinkRequest):
     except Exception as e:
         return {"error": str(e)}
 
-# ძველი ფუნქციაც დავტოვოთ, თუ ხელით ჩაწერა მოუნდებათ
+# ძველი ფუნქცია (ხელით შესავსები)
 class CarRequest(BaseModel):
     myauto_text: str
     vin_history_text: str
@@ -99,8 +123,21 @@ class CarRequest(BaseModel):
 
 @app.post("/analyze")
 def analyze_car(data: CarRequest):
-    # ... (ძველი კოდი იგივე რჩება) ...
-    pass 
+    if not GOOGLE_API_KEY:
+        return {"error": "API Key not configured"}
+
+    prompt = f"""
+    Role: Strict Georgian Car Expert.
+    Listing: {data.myauto_text}
+    Price: {data.price} USD
+    Real History: {data.vin_history_text}
+    Output JSON format: {{ "score": 0-100, "verdict": "string", "analysis": "string" }}
+    """
+    try:
+        response = model.generate_content(prompt)
+        return json.loads(response.text)
+    except Exception as e:
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
