@@ -14,10 +14,9 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-
-# გლობალური ცვლადი მოდელისთვის
 active_model = None
 
+# --- აი აქ არის მთავარი ცვლილება ---
 def setup_model():
     global active_model
     if not GOOGLE_API_KEY:
@@ -26,51 +25,64 @@ def setup_model():
 
     genai.configure(api_key=GOOGLE_API_KEY)
     
-    # მოდელების სია პრიორიტეტის მიხედვით
-    candidates = [
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-001",
-        "gemini-1.5-flash-002",
-        "gemini-1.5-flash-latest",
-        "gemini-pro",
-        "gemini-1.0-pro",
-        "gemini-1.0-pro-latest"
-    ]
-    
-    print("🔍 Searching for a working model...")
-    
-    for model_name in candidates:
-        try:
-            print(f"Testing model: {model_name}...")
-            # ვცდილობთ მარტივ მოთხოვნას
-            m = genai.GenerativeModel(model_name)
-            response = m.generate_content("Hello")
-            
-            if response and response.text:
-                print(f"✅ SUCCESS! Using model: {model_name}")
-                # თუ json mode-ს მხარდაჭერა აქვს (flash ვერსიებს), ვრთავთ
-                if "flash" in model_name:
-                    active_model = genai.GenerativeModel(model_name, generation_config={"response_mime_type": "application/json"})
-                else:
-                    active_model = genai.GenerativeModel(model_name)
-                return
-        except Exception as e:
-            print(f"❌ {model_name} failed: {e}")
-            continue
-            
-    print("⚠️ CRITICAL: No working model found in the list.")
+    try:
+        print("🔍 Asking Google for available models...")
+        # ვითხოვთ სიას
+        available_models = []
+        for m in genai.list_models():
+            # ვფილტრავთ მხოლოდ იმათ, ვისაც ტექსტის გენერაცია შეუძლია
+            if 'generateContent' in m.supported_generation_methods:
+                available_models.append(m.name)
+        
+        print(f"📋 Found models: {available_models}")
 
-# აპლიკაციის ჩართვისას ვეძებთ მოდელს
+        # პრიორიტეტი: ვეძებთ 'flash'-ს ან 'pro'-ს სიაში
+        selected_name = None
+        
+        # ჯერ ვეძებთ 1.5-flash-ს (ყველაზე სწრაფია)
+        for name in available_models:
+            if "gemini-1.5-flash" in name:
+                selected_name = name
+                break
+        
+        # თუ ვერ ვიპოვეთ, ნებისმიერი "gemini" ავიღოთ
+        if not selected_name:
+            for name in available_models:
+                if "gemini" in name:
+                    selected_name = name
+                    break
+        
+        # თუ მაინც ვერ ვიპოვეთ, ავიღოთ სიის პირველი წევრი
+        if not selected_name and available_models:
+            selected_name = available_models[0]
+
+        if selected_name:
+            print(f"✅ Selected Model: {selected_name}")
+            active_model = genai.GenerativeModel(selected_name)
+            
+            # სატესტო გაშვება
+            try:
+                active_model.generate_content("Test")
+                print("🚀 Test generation successful!")
+            except Exception as e:
+                print(f"⚠️ Model selected but failed test: {e}")
+        else:
+            print("❌ No suitable generation model found in the list.")
+
+    except Exception as e:
+        print(f"❌ Setup failed: {e}")
+
+# გაშვებისას ვარჩევთ მოდელს
 if GOOGLE_API_KEY:
     setup_model()
+
+# --- დანარჩენი ლოგიკა იგივეა ---
 
 class LinkRequest(BaseModel):
     url: str
 
 def clean_json_text(text):
-    # ასუფთავებს AI-ს პასუხს
     text = text.replace('```json', '').replace('```', '')
-    # ზოგჯერ json-ის გარეთაც წერს რაღაცებს, ვცდილობთ მოვძებნოთ { }
     start = text.find('{')
     end = text.rfind('}')
     if start != -1 and end != -1:
@@ -92,7 +104,7 @@ def get_myauto_data(car_id):
         if response.status_code != 200: return None
         data = response.json().get('data', {})
         if not data: return None
-        return f"მანქანა: {data.get('man_id')} {data.get('mod_id')}, წელი: {data.get('prod_year')}, გარბენი: {data.get('car_run_km')}კმ, აღწერა: {data.get('product_description')}"
+        return f"მანქანა: {data.get('man_id')} {data.get('mod_id')}, წელი: {data.get('prod_year')}, გარბენი: {data.get('car_run_km')}კმ, ძრავი: {data.get('engine_volume')}, აღწერა: {data.get('product_description')}"
     except: return None
 
 @app.get("/")
@@ -102,16 +114,15 @@ def read_root():
 @app.post("/scrape_and_analyze")
 def scrape_analyze(data: LinkRequest):
     if not active_model:
-        # თუ მოდელი ვერ შეირჩა, თავიდან ვცადოთ
-        setup_model()
+        setup_model() # კიდევ ერთხელ ვცადოთ
         if not active_model:
-            return {"error": "AI სისტემა დროებით მიუწვდომელია (Model selection failed)."}
+            return {"error": "სერვერმა ვერ იპოვა აქტიური AI მოდელი. გთხოვთ შეამოწმოთ ლოგები."}
 
     car_id = extract_id(data.url)
     if not car_id: return {"error": "ID ვერ ვიპოვე"}
 
     car_info = get_myauto_data(car_id)
-    if not car_info: return {"error": "ვერ მოხერხდა დაკავშირება. გამოიყენეთ ხელით შემოწმება."}
+    if not car_info: return {"error": "ვერ მოხერხდა დაკავშირება. სცადეთ ხელით შევსება."}
 
     prompt = f"""
     Role: Strict Georgian Car Expert.
@@ -123,8 +134,6 @@ def scrape_analyze(data: LinkRequest):
         response = active_model.generate_content(prompt)
         return json.loads(clean_json_text(response.text))
     except Exception as e:
-        # თუ არჩეულმა მოდელმა აურია, თავიდან ვცადოთ არჩევა შემდეგისთვის
-        setup_model()
         return {"error": f"AI Error: {str(e)}"}
 
 class CarRequest(BaseModel):
@@ -136,8 +145,7 @@ class CarRequest(BaseModel):
 def analyze_car(data: CarRequest):
     if not active_model:
         setup_model()
-        if not active_model:
-            return {"error": "AI სისტემა მიუწვდომელია"}
+        if not active_model: return {"error": "AI სისტემა მიუწვდომელია"}
             
     prompt = f"""
     Role: Strict Georgian Car Expert.
