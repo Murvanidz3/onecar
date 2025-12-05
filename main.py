@@ -14,72 +14,19 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-active_model = None
 
-# --- აი აქ არის მთავარი ცვლილება ---
-def setup_model():
-    global active_model
-    if not GOOGLE_API_KEY:
-        print("❌ API Key is missing!")
-        return
-
-    genai.configure(api_key=GOOGLE_API_KEY)
-    
-    try:
-        print("🔍 Asking Google for available models...")
-        # ვითხოვთ სიას
-        available_models = []
-        for m in genai.list_models():
-            # ვფილტრავთ მხოლოდ იმათ, ვისაც ტექსტის გენერაცია შეუძლია
-            if 'generateContent' in m.supported_generation_methods:
-                available_models.append(m.name)
-        
-        print(f"📋 Found models: {available_models}")
-
-        # პრიორიტეტი: ვეძებთ 'flash'-ს ან 'pro'-ს სიაში
-        selected_name = None
-        
-        # ჯერ ვეძებთ 1.5-flash-ს (ყველაზე სწრაფია)
-        for name in available_models:
-            if "gemini-1.5-flash" in name:
-                selected_name = name
-                break
-        
-        # თუ ვერ ვიპოვეთ, ნებისმიერი "gemini" ავიღოთ
-        if not selected_name:
-            for name in available_models:
-                if "gemini" in name:
-                    selected_name = name
-                    break
-        
-        # თუ მაინც ვერ ვიპოვეთ, ავიღოთ სიის პირველი წევრი
-        if not selected_name and available_models:
-            selected_name = available_models[0]
-
-        if selected_name:
-            print(f"✅ Selected Model: {selected_name}")
-            active_model = genai.GenerativeModel(selected_name)
-            
-            # სატესტო გაშვება
-            try:
-                active_model.generate_content("Test")
-                print("🚀 Test generation successful!")
-            except Exception as e:
-                print(f"⚠️ Model selected but failed test: {e}")
-        else:
-            print("❌ No suitable generation model found in the list.")
-
-    except Exception as e:
-        print(f"❌ Setup failed: {e}")
-
-# გაშვებისას ვარჩევთ მოდელს
 if GOOGLE_API_KEY:
-    setup_model()
-
-# --- დანარჩენი ლოგიკა იგივეა ---
+    genai.configure(api_key=GOOGLE_API_KEY)
 
 class LinkRequest(BaseModel):
     url: str
+
+class CarRequest(BaseModel):
+    myauto_text: str
+    vin_history_text: str
+    price: int
+
+# --- დამხმარე ფუნქციები ---
 
 def clean_json_text(text):
     text = text.replace('```json', '').replace('```', '')
@@ -100,12 +47,46 @@ def extract_id(input_str):
 def get_myauto_data(car_id):
     try:
         api_url = f"https://api2.myauto.ge/ka/products/{car_id}"
+        # ვიყენებთ Chrome-ის იმიტაციას
         response = cffi_requests.get(api_url, impersonate="chrome")
         if response.status_code != 200: return None
         data = response.json().get('data', {})
         if not data: return None
-        return f"მანქანა: {data.get('man_id')} {data.get('mod_id')}, წელი: {data.get('prod_year')}, გარბენი: {data.get('car_run_km')}კმ, ძრავი: {data.get('engine_volume')}, აღწერა: {data.get('product_description')}"
+        
+        return f"""
+        მანქანა: {data.get('man_id')} {data.get('mod_id')}
+        წელი: {data.get('prod_year')}
+        ფასი: {data.get('price_usd', 0)}$
+        გარბენი: {data.get('car_run_km')} კმ
+        ძრავი: {data.get('engine_volume')}
+        განბაჟება: {data.get('customs_passed')}
+        აღწერა: {data.get('product_description')}
+        """
     except: return None
+
+# --- AI ფუნქცია (Smart Retry) ---
+# ეს ფუნქცია ეცდება 1.5-flash-ს, თუ არ გამოვიდა - gemini-pro-ს
+def ask_gemini(prompt):
+    models_to_try = ["gemini-1.5-flash", "gemini-pro"]
+    
+    last_error = None
+    
+    for model_name in models_to_try:
+        try:
+            print(f"🤖 Trying model: {model_name}...")
+            # მნიშვნელოვანი: აქ არ ვუწერთ 'models/' პრეფიქსს, სუფთა სახელს ვაწვდით
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            return json.loads(clean_json_text(response.text))
+        except Exception as e:
+            print(f"⚠️ {model_name} failed: {e}")
+            last_error = e
+            continue
+            
+    # თუ ვერცერთმა ვერ იმუშავა
+    return {"error": f"AI Error: {str(last_error)}"}
+
+# --- Routes ---
 
 @app.get("/")
 def read_root():
@@ -113,16 +94,13 @@ def read_root():
 
 @app.post("/scrape_and_analyze")
 def scrape_analyze(data: LinkRequest):
-    if not active_model:
-        setup_model() # კიდევ ერთხელ ვცადოთ
-        if not active_model:
-            return {"error": "სერვერმა ვერ იპოვა აქტიური AI მოდელი. გთხოვთ შეამოწმოთ ლოგები."}
+    if not GOOGLE_API_KEY: return {"error": "API Key not configured"}
 
     car_id = extract_id(data.url)
     if not car_id: return {"error": "ID ვერ ვიპოვე"}
 
     car_info = get_myauto_data(car_id)
-    if not car_info: return {"error": "ვერ მოხერხდა დაკავშირება. სცადეთ ხელით შევსება."}
+    if not car_info: return {"error": "ვერ მოხერხდა MyAuto-სთან დაკავშირება. გამოიყენეთ ხელით შემოწმება."}
 
     prompt = f"""
     Role: Strict Georgian Car Expert.
@@ -130,33 +108,18 @@ def scrape_analyze(data: LinkRequest):
     Output JSON format: {{ "score": 0-100, "verdict": "geo string", "analysis": "geo string" }}
     """
     
-    try:
-        response = active_model.generate_content(prompt)
-        return json.loads(clean_json_text(response.text))
-    except Exception as e:
-        return {"error": f"AI Error: {str(e)}"}
-
-class CarRequest(BaseModel):
-    myauto_text: str
-    vin_history_text: str
-    price: int
+    return ask_gemini(prompt)
 
 @app.post("/analyze")
 def analyze_car(data: CarRequest):
-    if not active_model:
-        setup_model()
-        if not active_model: return {"error": "AI სისტემა მიუწვდომელია"}
+    if not GOOGLE_API_KEY: return {"error": "API Key not configured"}
             
     prompt = f"""
     Role: Strict Georgian Car Expert.
     Listing: {data.myauto_text}, Price: {data.price}, History: {data.vin_history_text}
     Output JSON format: {{ "score": 0-100, "verdict": "geo string", "analysis": "geo string" }}
     """
-    try:
-        response = active_model.generate_content(prompt)
-        return json.loads(clean_json_text(response.text))
-    except Exception as e:
-        return {"error": str(e)}
+    return ask_gemini(prompt)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
