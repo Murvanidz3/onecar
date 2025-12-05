@@ -66,18 +66,17 @@ def ask_gemini_direct(prompt):
     if not GOOGLE_API_KEY:
         return {"error": "API Key is missing"}
 
-    # პირდაპირი მისამართი Google-ის სერვერზე
+    # პირდაპირი მისამართი Google-ის სერვერზე (REST API)
+    # ვიყენებთ gemini-1.5-flash-ს
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GOOGLE_API_KEY}"
     
     headers = {"Content-Type": "application/json"}
     
+    # მონაცემების გამზადება Google-ის ფორმატით
     payload = {
         "contents": [{
             "parts": [{"text": prompt}]
-        }],
-        "generationConfig": {
-            "response_mime_type": "application/json"
-        }
+        }]
     }
 
     try:
@@ -85,19 +84,22 @@ def ask_gemini_direct(prompt):
         response = requests.post(url, headers=headers, json=payload)
         
         if response.status_code != 200:
-            # თუ მაინც ერორია, ვცადოთ gemini-pro
+            # თუ მაინც ერორია, ვცადოთ gemini-pro (Backup)
             fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GOOGLE_API_KEY}"
-            # pro-ს არ აქვს json mode, ამიტომ კონფიგს ვცვლით
-            payload_pro = {"contents": [{"parts": [{"text": prompt + " Return JSON only."}]}]}
-            response = requests.post(fallback_url, headers=headers, json=payload_pro)
+            response = requests.post(fallback_url, headers=headers, json=payload)
             
             if response.status_code != 200:
                 return {"error": f"Google API Error: {response.text}"}
 
         result = response.json()
-        # პასუხის ამოღება
-        text_response = result['candidates'][0]['content']['parts'][0]['text']
-        return json.loads(clean_json_text(text_response))
+        
+        # პასუხის ამოღება JSON სტრუქტურიდან
+        if 'candidates' in result and result['candidates']:
+            text_response = result['candidates'][0]['content']['parts'][0]['text']
+            # AI აბრუნებს ტექსტს, რომელიც JSON-ს შეიცავს. ჩვენ მას ვასუფთავებთ და ობიექტად ვაქცევთ.
+            return json.loads(clean_json_text(text_response))
+        else:
+            return {"error": "AI-მ ცარიელი პასუხი დააბრუნა."}
 
     except Exception as e:
         return {"error": f"Connection Error: {str(e)}"}
