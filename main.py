@@ -1,7 +1,7 @@
 import os
 import uvicorn
-import google.generativeai as genai
-from curl_cffi import requests as cffi_requests
+import requests  # ვიყენებთ სტანდარტულ requests-ს Google-ისთვის
+from curl_cffi import requests as cffi_requests # MyAuto-სთვის
 import re
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -14,9 +14,6 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-
-if GOOGLE_API_KEY:
-    genai.configure(api_key=GOOGLE_API_KEY)
 
 class LinkRequest(BaseModel):
     url: str
@@ -47,7 +44,7 @@ def extract_id(input_str):
 def get_myauto_data(car_id):
     try:
         api_url = f"https://api2.myauto.ge/ka/products/{car_id}"
-        # ვიყენებთ Chrome-ის იმიტაციას
+        # MyAuto-ს დაცვის გვერდის ავლით
         response = cffi_requests.get(api_url, impersonate="chrome")
         if response.status_code != 200: return None
         data = response.json().get('data', {})
@@ -64,27 +61,46 @@ def get_myauto_data(car_id):
         """
     except: return None
 
-# --- AI ფუნქცია (Smart Retry) ---
-# ეს ფუნქცია ეცდება 1.5-flash-ს, თუ არ გამოვიდა - gemini-pro-ს
-def ask_gemini(prompt):
-    # აქ პირდაპირ სახელებს ვწერთ, პრეფიქსების გარეშე
-    models_to_try = ["gemini-1.5-flash", "gemini-pro"]
+# --- ახალი AI ფუნქცია (პირდაპირი REST API) ---
+def ask_gemini_direct(prompt):
+    if not GOOGLE_API_KEY:
+        return {"error": "API Key is missing"}
+
+    # პირდაპირი მისამართი Google-ის სერვერზე
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GOOGLE_API_KEY}"
     
-    last_error = None
+    headers = {"Content-Type": "application/json"}
     
-    for model_name in models_to_try:
-        try:
-            print(f"🤖 Trying model: {model_name}...")
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
-            return json.loads(clean_json_text(response.text))
-        except Exception as e:
-            print(f"⚠️ {model_name} failed: {e}")
-            last_error = e
-            continue
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }],
+        "generationConfig": {
+            "response_mime_type": "application/json"
+        }
+    }
+
+    try:
+        # ვაგზავნით მოთხოვნას პირდაპირ, ბიბლიოთეკის გარეშე
+        response = requests.post(url, headers=headers, json=payload)
+        
+        if response.status_code != 200:
+            # თუ მაინც ერორია, ვცადოთ gemini-pro
+            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GOOGLE_API_KEY}"
+            # pro-ს არ აქვს json mode, ამიტომ კონფიგს ვცვლით
+            payload_pro = {"contents": [{"parts": [{"text": prompt + " Return JSON only."}]}]}
+            response = requests.post(fallback_url, headers=headers, json=payload_pro)
             
-    # თუ ვერცერთმა ვერ იმუშავა
-    return {"error": f"AI Error: {str(last_error)}"}
+            if response.status_code != 200:
+                return {"error": f"Google API Error: {response.text}"}
+
+        result = response.json()
+        # პასუხის ამოღება
+        text_response = result['candidates'][0]['content']['parts'][0]['text']
+        return json.loads(clean_json_text(text_response))
+
+    except Exception as e:
+        return {"error": f"Connection Error: {str(e)}"}
 
 # --- Routes ---
 
@@ -94,13 +110,11 @@ def read_root():
 
 @app.post("/scrape_and_analyze")
 def scrape_analyze(data: LinkRequest):
-    if not GOOGLE_API_KEY: return {"error": "API Key not configured"}
-
     car_id = extract_id(data.url)
     if not car_id: return {"error": "ID ვერ ვიპოვე"}
 
     car_info = get_myauto_data(car_id)
-    if not car_info: return {"error": "ვერ მოხერხდა MyAuto-სთან დაკავშირება. გამოიყენეთ ხელით შემოწმება."}
+    if not car_info: return {"error": "MyAuto-სთან დაკავშირება ვერ მოხერხდა."}
 
     prompt = f"""
     Role: Strict Georgian Car Expert.
@@ -108,18 +122,16 @@ def scrape_analyze(data: LinkRequest):
     Output JSON format: {{ "score": 0-100, "verdict": "geo string", "analysis": "geo string" }}
     """
     
-    return ask_gemini(prompt)
+    return ask_gemini_direct(prompt)
 
 @app.post("/analyze")
 def analyze_car(data: CarRequest):
-    if not GOOGLE_API_KEY: return {"error": "API Key not configured"}
-            
     prompt = f"""
     Role: Strict Georgian Car Expert.
     Listing: {data.myauto_text}, Price: {data.price}, History: {data.vin_history_text}
     Output JSON format: {{ "score": 0-100, "verdict": "geo string", "analysis": "geo string" }}
     """
-    return ask_gemini(prompt)
+    return ask_gemini_direct(prompt)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
