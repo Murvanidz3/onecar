@@ -67,6 +67,7 @@ def get_myauto_data(car_id):
 # --- AI ფუნქცია (Smart Retry) ---
 # ეს ფუნქცია ეცდება 1.5-flash-ს, თუ არ გამოვიდა - gemini-pro-ს
 def ask_gemini(prompt):
+    # აქ პირდაპირ სახელებს ვწერთ, პრეფიქსების გარეშე
     models_to_try = ["gemini-1.5-flash", "gemini-pro"]
     
     last_error = None
@@ -74,7 +75,6 @@ def ask_gemini(prompt):
     for model_name in models_to_try:
         try:
             print(f"🤖 Trying model: {model_name}...")
-            # მნიშვნელოვანი: აქ არ ვუწერთ 'models/' პრეფიქსს, სუფთა სახელს ვაწვდით
             model = genai.GenerativeModel(model_name)
             response = model.generate_content(prompt)
             return json.loads(clean_json_text(response.text))
