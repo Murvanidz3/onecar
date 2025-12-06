@@ -1,139 +1,114 @@
 import os
 import uvicorn
-import requests  # ვიყენებთ სტანდარტულ requests-ს Google-ისთვის
-from curl_cffi import requests as cffi_requests # MyAuto-სთვის
-import re
+from curl_cffi import requests as cffi_requests
+from bs4 import BeautifulSoup
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-import json
+import re
 
 app = FastAPI()
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+class VinRequest(BaseModel):
+    vin: str
 
-class LinkRequest(BaseModel):
-    url: str
-
-class CarRequest(BaseModel):
-    myauto_text: str
-    vin_history_text: str
-    price: int
-
-# --- დამხმარე ფუნქციები ---
-
-def clean_json_text(text):
-    text = text.replace('```json', '').replace('```', '')
-    start = text.find('{')
-    end = text.rfind('}')
-    if start != -1 and end != -1:
-        text = text[start:end+1]
-    return text.strip()
-
-def extract_id(input_str):
-    if input_str.isdigit(): return input_str
-    match = re.search(r'/pr/(\d+)', input_str)
-    if match: return match.group(1)
-    match = re.search(r'(\d{8,})', input_str)
-    if match: return match.group(1)
-    return None
-
-def get_myauto_data(car_id):
+def scrape_bidcars(vin):
     try:
-        api_url = f"https://api2.myauto.ge/ka/products/{car_id}"
-        # MyAuto-ს დაცვის გვერდის ავლით
-        response = cffi_requests.get(api_url, impersonate="chrome")
-        if response.status_code != 200: return None
-        data = response.json().get('data', {})
-        if not data: return None
+        # 1. ძებნა VIN კოდით
+        search_url = f"https://bid.cars/en/search/results?search-term={vin}"
+        print(f"Searching: {search_url}")
         
-        return f"""
-        მანქანა: {data.get('man_id')} {data.get('mod_id')}
-        წელი: {data.get('prod_year')}
-        ფასი: {data.get('price_usd', 0)}$
-        გარბენი: {data.get('car_run_km')} კმ
-        ძრავი: {data.get('engine_volume')}
-        განბაჟება: {data.get('customs_passed')}
-        აღწერა: {data.get('product_description')}
-        """
-    except: return None
-
-# --- ახალი AI ფუნქცია (პირდაპირი REST API) ---
-def ask_gemini_direct(prompt):
-    if not GOOGLE_API_KEY:
-        return {"error": "API Key is missing"}
-
-    # პირდაპირი მისამართი Google-ის სერვერზე (REST API)
-    # ვიყენებთ gemini-1.5-flash-ს
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GOOGLE_API_KEY}"
-    
-    headers = {"Content-Type": "application/json"}
-    
-    # მონაცემების გამზადება Google-ის ფორმატით
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }]
-    }
-
-    try:
-        # ვაგზავნით მოთხოვნას პირდაპირ, ბიბლიოთეკის გარეშე
-        response = requests.post(url, headers=headers, json=payload)
-        
+        response = cffi_requests.get(search_url, impersonate="chrome")
         if response.status_code != 200:
-            # თუ მაინც ერორია, ვცადოთ gemini-pro (Backup)
-            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GOOGLE_API_KEY}"
-            response = requests.post(fallback_url, headers=headers, json=payload)
-            
-            if response.status_code != 200:
-                return {"error": f"Google API Error: {response.text}"}
+            return {"error": "ვერ დავუკავშირდი Bid.cars-ს"}
 
-        result = response.json()
+        soup = BeautifulSoup(response.content, 'html.parser')
         
-        # პასუხის ამოღება JSON სტრუქტურიდან
-        if 'candidates' in result and result['candidates']:
-            text_response = result['candidates'][0]['content']['parts'][0]['text']
-            # AI აბრუნებს ტექსტს, რომელიც JSON-ს შეიცავს. ჩვენ მას ვასუფთავებთ და ობიექტად ვაქცევთ.
-            return json.loads(clean_json_text(text_response))
+        # ვეძებთ შედეგს (მანქანის ლინკს)
+        # ჩვეულებრივ ეს არის 'view-auction' ღილაკი ან ლინკი სიაში
+        car_link = None
+        results = soup.find_all('a', href=True)
+        for link in results:
+            if "/lot/" in link['href']:
+                car_link = link['href']
+                break
+        
+        if not car_link:
+             # ზოგჯერ პირდაპირ მანქანის გვერდზე გადაჰყავს
+             if "/lot/" in response.url:
+                 car_link = response.url
+             else:
+                 return {"error": "მანქანა ვერ მოიძებნა არქივში 🤷‍♂️"}
+
+        # სრული ლინკის აწყობა
+        if not car_link.startswith("http"):
+            full_link = f"https://bid.cars{car_link}"
         else:
-            return {"error": "AI-მ ცარიელი პასუხი დააბრუნა."}
+            full_link = car_link
+
+        print(f"Found Page: {full_link}")
+
+        # 2. შევდივართ მანქანის გვერდზე
+        page_response = cffi_requests.get(full_link, impersonate="chrome")
+        page_soup = BeautifulSoup(page_response.content, 'html.parser')
+
+        # 3. მონაცემების ამოღება
+        data = {
+            "title": "უცნობი",
+            "images": [],
+            "info": {}
+        }
+
+        # სათაური
+        h1 = page_soup.find('h1')
+        if h1: data['title'] = h1.get_text(strip=True)
+
+        # ფოტოები (Gallery)
+        # bid.cars-ზე ფოტოები ხშირად არის "galleria" ან "owl-carousel" კლასებში
+        images = []
+        img_tags = page_soup.find_all('img')
+        for img in img_tags:
+            src = img.get('src') or img.get('data-src')
+            if src and "media.bid.cars" in src and "small" not in src:
+                # ვცდილობთ დიდი ზომის ფოტოები ავიღოთ
+                full_size = src.replace("thumbnails/", "").replace("small/", "")
+                if full_size not in images:
+                    images.append(full_size)
+        
+        # ვიღებთ მხოლოდ პირველ 5-6 ფოტოს, რომ არ გადაიტვირთოს
+        data['images'] = images[:6]
+
+        # ტექნიკური ინფო (ცხრილიდან)
+        # ვეძებთ ველებს: Primary Damage, Odometer, etc.
+        info_block = page_soup.get_text()
+        
+        # მარტივი Regex ძებნა ტექსტში
+        odometer = re.search(r'Odometer[:\s]+([\d,]+)', info_block)
+        damage = re.search(r'Primary Damage[:\s]+([A-Za-z\s]+)', info_block)
+        engine = re.search(r'Engine[:\s]+([0-9\.]+L)', info_block)
+
+        if odometer: data['info']['odometer'] = odometer.group(1)
+        if damage: data['info']['damage'] = damage.group(1).strip()
+        if engine: data['info']['engine'] = engine.group(1)
+
+        return data
 
     except Exception as e:
-        return {"error": f"Connection Error: {str(e)}"}
-
-# --- Routes ---
+        print(f"Error scraping: {e}")
+        return {"error": str(e)}
 
 @app.get("/")
 def read_root():
     return FileResponse('static/index.html')
 
-@app.post("/scrape_and_analyze")
-def scrape_analyze(data: LinkRequest):
-    car_id = extract_id(data.url)
-    if not car_id: return {"error": "ID ვერ ვიპოვე"}
-
-    car_info = get_myauto_data(car_id)
-    if not car_info: return {"error": "MyAuto-სთან დაკავშირება ვერ მოხერხდა."}
-
-    prompt = f"""
-    Role: Strict Georgian Car Expert.
-    Task: Analyze MyAuto data: {car_info}
-    Output JSON format: {{ "score": 0-100, "verdict": "geo string", "analysis": "geo string" }}
-    """
-    
-    return ask_gemini_direct(prompt)
-
-@app.post("/analyze")
-def analyze_car(data: CarRequest):
-    prompt = f"""
-    Role: Strict Georgian Car Expert.
-    Listing: {data.myauto_text}, Price: {data.price}, History: {data.vin_history_text}
-    Output JSON format: {{ "score": 0-100, "verdict": "geo string", "analysis": "geo string" }}
-    """
-    return ask_gemini_direct(prompt)
+# ახალი ენდპოინტი VIN-ის შესამოწმებლად
+@app.post("/check_vin")
+def check_vin_handler(req: VinRequest):
+    result = scrape_bidcars(req.vin)
+    return result
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
