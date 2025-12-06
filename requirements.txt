@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-pydantic
-curl_cffi
 requests
+curl_cffi
 beautifulsoup4
+pydantic
