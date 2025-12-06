@@ -1,6 +1,5 @@
 fastapi
 uvicorn
-requests
-curl_cffi
-beautifulsoup4
 pydantic
+duckduckgo-search
+requests

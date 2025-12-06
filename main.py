@@ -1,12 +1,10 @@
 import os
 import uvicorn
-from curl_cffi import requests as cffi_requests
-from bs4 import BeautifulSoup
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-import re
+from duckduckgo_search import DDGS
 
 app = FastAPI()
 
@@ -15,92 +13,64 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 class VinRequest(BaseModel):
     vin: str
 
-def scrape_carfast(vin):
-    try:
-        # Carfast-ის ძებნის ლინკი
-        search_url = f"https://carfast.express/en/cars/buy_report?vin={vin}"
-        print(f"🔍 Searching Carfast: {search_url}")
-        
-        # ვიყენებთ Chrome-ის იმიტაციას
-        response = cffi_requests.get(
-            search_url, 
-            impersonate="chrome120",
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9"
-            }
-        )
-        
-        if response.status_code != 200:
-            return {"error": f"Carfast Error: {response.status_code}"}
-
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        data = {
-            "title": "ნაპოვნია!",
-            "images": [],
-            "info": {}
+def smart_vin_search(vin):
+    data = {
+        "title": f"VIN: {vin}",
+        "images": [],
+        "info": {
+            "odometer": "უცნობია",
+            "damage": "უცნობია",
+            "source": "Global Search"
         }
+    }
 
-        # 1. ძირითადი ფოტო (Carfast-ზე ხშირად მხოლოდ 1 ფოტო ჩანს უფასოდ)
-        # ვეძებთ სურათს 'car-photo' კლასში ან მსგავსში
-        main_img = soup.find('img', class_='car-card__img') # სავარაუდო კლასი
+    try:
+        print(f"🔍 Searching logic for: {vin}")
         
-        if not main_img:
-            # ვცადოთ უფრო ზოგადი ძებნა
-            images = soup.find_all('img')
-            for img in images:
-                src = img.get('src', '')
-                # Carfast-ის სურათები ხშირად "photos" ან "images" საქაღალდეშია
-                if '/photos/' in src or 'blob:' not in src and src.startswith('http'):
-                    if 'logo' not in src and 'icon' not in src:
-                        data['images'].append(src)
-                        break # პირველივე რეალურ ფოტოს ვიღებთ
-        else:
-            src = main_img.get('src')
-            if src: data['images'].append(src)
+        # 1. სურათების ძებნა (DuckDuckGo Images)
+        # ვეძებთ კონკრეტულად აუქციონის ფოტოებს
+        with DDGS() as ddgs:
+            # ვეძებთ: VIN + "bidfax" ან "auction"
+            keywords = f"{vin} car auction"
+            ddg_images = list(ddgs.images(
+                keywords, 
+                region="wt-wt", 
+                safesearch="off", 
+                max_results=10
+            ))
 
-        # 2. ინფორმაციის ამოღება (ცხრილიდან)
-        # ვეძებთ "VIN", "Model", "Engine"
-        info_blocks = soup.find_all('div', class_='car-card__row') # სავარაუდო სტრუქტურა
-        
-        # თუ კლასები შეიცვალა, ვეძებთ ტექსტით
-        text_content = soup.get_text()
-        
-        model_match = re.search(r'Model\s+([A-Za-z0-9\s]+)', text_content)
-        engine_match = re.search(r'Engine\s+([A-Za-z0-9\.\s]+)', text_content)
-        
-        if model_match:
-            data['title'] = model_match.group(1).strip()
-        else:
-            # სათაურის ალტერნატიული ძებნა
-            h1 = soup.find('h1')
-            if h1: data['title'] = h1.get_text(strip=True)
+            if ddg_images:
+                print(f"✅ Found {len(ddg_images)} images via Search")
+                for img in ddg_images:
+                    # ვიღებთ სურათის პირდაპირ ლინკს
+                    if 'image' in img:
+                        data['images'].append(img['image'])
+                    elif 'thumbnail' in img:
+                        data['images'].append(img['thumbnail'])
 
-        if engine_match:
-            data['info']['engine'] = engine_match.group(1).strip()
-
-        # თუ ფოტო ვერ ვიპოვეთ, ე.ი. არაფერი ჩანს
-        if not data['images']:
-            # კიდევ ერთი ცდა: ვეძებთ background-image-ს
-            divs = soup.find_all('div', style=True)
-            for div in divs:
-                style = div['style']
-                if 'background-image' in style and 'url' in style:
-                    url_match = re.search(r'url\([\'"]?(.*?)[\'"]?\)', style)
-                    if url_match:
-                        img_url = url_match.group(1)
-                        if 'car' in img_url or 'photo' in img_url:
-                            data['images'].append(img_url)
-                            break
+        # 2. ტექსტური ინფორმაციის ძებნა (სათაურისთვის)
+        with DDGS() as ddgs:
+            ddg_text = list(ddgs.text(f"{vin} bidfax", max_results=1))
+            if ddg_text:
+                first_result = ddg_text[0]
+                # სათაურიდან ვცდილობთ მანქანის სახელის ამოღებას
+                # მაგ: "2018 BMW 5 SERIES - Bidfax"
+                title_raw = first_result.get('title', '')
+                clean_title = title_raw.split('-')[0].split('|')[0].strip()
+                data['title'] = clean_title
+                
+                # აღწერაში შეიძლება იყოს გარბენი
+                body_text = first_result.get('body', '')
+                if 'mi' in body_text or 'km' in body_text:
+                    data['info']['odometer'] = "იხილეთ ფოტოზე" # ზუსტი ამოღება რთულია, მაგრამ ფოტო გვაქვს
 
         if not data['images']:
-             return {"error": "ფოტო ვერ მოიძებნა (შესაძლოა ფასიანია ან VIN არასწორია)"}
+            return {"error": "სამწუხაროდ, ამ VIN-ზე ფოტოები საძიებო სისტემაშიც არ იძებნება."}
 
         return data
 
     except Exception as e:
-        print(f"🔥 Error scraping: {e}")
+        print(f"🔥 Search Error: {e}")
         return {"error": str(e)}
 
 @app.get("/")
@@ -109,7 +79,7 @@ def read_root():
 
 @app.post("/check_vin")
 def check_vin_handler(req: VinRequest):
-    result = scrape_carfast(req.vin)
+    result = smart_vin_search(req.vin)
     return result
 
 if __name__ == "__main__":
