@@ -3,52 +3,53 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto Helper 🚗</title>
+    <title>VIN History 🇺🇸</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background-color: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; padding: 20px; margin: 0; }
         .container { max-width: 600px; width: 100%; background: #1e1e1e; padding: 30px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
         h1 { text-align: center; color: #FF9800; margin-bottom: 5px; }
         .subtitle { text-align: center; color: #888; margin-bottom: 30px; font-size: 14px; }
         
-        input { width: 100%; padding: 12px; margin-top: 5px; background: #2d2d2d; border: 1px solid #444; color: #fff; border-radius: 8px; box-sizing: border-box; font-size: 16px; text-align: center; letter-spacing: 1px; }
+        label { display: block; margin-top: 15px; color: #bbb; font-size: 13px; }
+        input { width: 100%; padding: 15px; margin-top: 5px; background: #2d2d2d; border: 1px solid #444; color: #fff; border-radius: 8px; box-sizing: border-box; font-size: 18px; text-align: center; letter-spacing: 1px; }
         input:focus { outline: none; border-color: #FF9800; }
         
-        button { width: 100%; padding: 12px; border: none; background: #FF9800; color: white; font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; transition: 0.3s; margin-top: 15px; }
+        button { width: 100%; padding: 15px; border: none; background: #FF9800; color: white; font-size: 18px; font-weight: bold; border-radius: 8px; cursor: pointer; transition: 0.3s; margin-top: 20px; }
         button:hover { background: #F57C00; }
 
-        /* შედეგების ბლოკი */
+        /* შედეგები */
         #result { margin-top: 30px; display: none; }
-        .car-title { font-size: 18px; font-weight: bold; text-align: center; margin-bottom: 15px; }
+        .car-title { font-size: 20px; font-weight: bold; text-align: center; margin-bottom: 20px; color: #fff; }
         
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
-        .info-item { background: #252525; padding: 10px; border-radius: 8px; text-align: center; border: 1px solid #333; }
-        .info-label { display: block; font-size: 12px; color: #888; }
-        .info-val { display: block; font-size: 14px; font-weight: bold; color: #fff; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 25px; }
+        .info-item { background: #252525; padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #333; }
+        .info-label { display: block; font-size: 12px; color: #888; margin-bottom: 5px; }
+        .info-val { display: block; font-size: 16px; font-weight: bold; color: #fff; }
 
-        .gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .gallery img { width: 100%; border-radius: 8px; border: 1px solid #444; }
+        .gallery { display: grid; grid-template-columns: 1fr; gap: 15px; }
+        .gallery img { width: 100%; border-radius: 10px; border: 1px solid #444; }
 
         .loader { border: 4px solid #333; border-top: 4px solid #FF9800; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 30px auto; display: none; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         
-        .error-msg { color: #ff4444; text-align: center; margin-top: 20px; display: none; }
+        .error-msg { background: #ff444433; color: #ff4444; padding: 15px; border-radius: 8px; text-align: center; margin-top: 20px; display: none; border: 1px solid #ff4444; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>VIN History 🇺🇸</h1>
+    <h1>VIN History us</h1>
     <p class="subtitle">ნახე აუქციონის ფოტოები და ისტორია</p>
 
-    <label style="color:#bbb; font-size:12px; margin-left:5px;">შეიყვანე VIN კოდი:</label>
-    <input type="text" id="vinInput" placeholder="მაგ: 5UXWN9C59H0...">
+    <label>შეიყვანე VIN კოდი:</label>
+    <input type="text" id="vinInput" placeholder="მაგ: WBA6D0C55GD...">
     <button onclick="checkVin()">მოძებნა 🔍</button>
 
     <div class="loader" id="loader"></div>
     <div class="error-msg" id="errorMsg"></div>
 
     <div id="result">
-        <div class="car-title" id="carTitle">BMW X5 2017</div>
+        <div class="car-title" id="carTitle">--</div>
         
         <div class="info-grid">
             <div class="info-item">
@@ -57,25 +58,20 @@
             </div>
             <div class="info-item">
                 <span class="info-label">დაზიანება</span>
-                <span class="info-val" id="valDamage" style="color: #ff4444;">--</span>
-            </div>
-            <div class="info-item">
-                <span class="info-label">ძრავი</span>
-                <span class="info-val" id="valEngine">--</span>
+                <span class="info-val" id="valDamage" style="color: #FF9800;">--</span>
             </div>
         </div>
 
-        <div class="gallery" id="gallery">
-            </div>
+        <div class="gallery" id="gallery"></div>
     </div>
 </div>
 
 <script>
     async function checkVin() {
         const vin = document.getElementById('vinInput').value.trim();
-        if(vin.length < 10) { alert("VIN კოდი არასწორია!"); return; }
+        if(vin.length < 5) { alert("შეიყვანეთ სწორი VIN კოდი!"); return; }
 
-        // UI Reset
+        // გასუფთავება
         document.getElementById('loader').style.display = 'block';
         document.getElementById('result').style.display = 'none';
         document.getElementById('errorMsg').style.display = 'none';
@@ -97,21 +93,23 @@
                 return;
             }
 
-            // მონაცემების შევსება
+            // მონაცემების გამოჩენა
             document.getElementById('result').style.display = 'block';
             document.getElementById('carTitle').innerText = data.title;
-            
             document.getElementById('valOdo').innerText = data.info.odometer || "უცნობია";
             document.getElementById('valDamage').innerText = data.info.damage || "უცნობია";
-            document.getElementById('valEngine').innerText = data.info.engine || "უცნობია";
 
-            // ფოტოების ჩამატება
+            // ფოტოები
             const gallery = document.getElementById('gallery');
-            data.images.forEach(imgSrc => {
-                const img = document.createElement('img');
-                img.src = imgSrc;
-                gallery.appendChild(img);
-            });
+            if(data.images && data.images.length > 0) {
+                data.images.forEach(imgSrc => {
+                    const img = document.createElement('img');
+                    img.src = imgSrc;
+                    gallery.appendChild(img);
+                });
+            } else {
+                gallery.innerHTML = '<p style="text-align:center; color:#888;">ფოტოები ვერ მოიძებნა</p>';
+            }
 
         } catch (error) {
             console.error(error);

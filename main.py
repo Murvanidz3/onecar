@@ -15,44 +15,50 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 class VinRequest(BaseModel):
     vin: str
 
-def scrape_bidfax(vin):
+def scrape_bidcars(vin):
     try:
-        # Bidfax-ის ძებნის URL
-        search_url = f"https://en.bidfax.info/?do=search&subaction=search&story={vin}"
-        print(f"🔍 Searching Bidfax: {search_url}")
+        # 1. ძებნა VIN კოდით Bid.cars-ზე
+        search_url = f"https://bid.cars/en/search/results?search-term={vin}"
+        print(f"🔍 Searching: {search_url}")
         
-        # Chrome-ის იმიტაცია
-        response = cffi_requests.get(
-            search_url, 
-            impersonate="chrome124",
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}
-        )
-
+        # ვიყენებთ Chrome-ის იმიტაციას (დაცვის გასავლელად)
+        response = cffi_requests.get(search_url, impersonate="chrome124")
+        
         if response.status_code != 200:
-            return {"error": f"Bidfax Error: {response.status_code}"}
+            return {"error": f"ვერ დავუკავშირდი საიტს (Status: {response.status_code})"}
 
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # ვეძებთ მანქანის ლინკს ძებნის შედეგებში
-        # Bidfax-ზე შედეგები არის h2 ტეგში, კლასით "short-teaser-title" ან უბრალოდ ლინკები
+        # 2. ვეძებთ შედეგს (მანქანის ლინკს)
         car_link = None
         
-        # ვეძებთ ყველა ლინკს, რომელიც შეიცავს VIN კოდს ან ტიპიურ სტრუქტურას
-        main_block = soup.find('div', id='dle-content')
-        if main_block:
-            first_result = main_block.find('a', href=True)
-            if first_result:
-                car_link = first_result['href']
+        # ვამოწმებთ, პირდაპირ ხომ არ გადაგვაგდო მანქანის გვერდზე?
+        if "/lot/" in response.url:
+            car_link = response.url
+        else:
+            # თუ არა, ვეძებთ სიაში
+            results = soup.find_all('a', href=True)
+            for link in results:
+                if "/lot/" in link['href']:
+                    car_link = link['href']
+                    break
         
         if not car_link:
-            return {"error": "მანქანა არქივში ვერ მოიძებნა (Bidfax) 🤷‍♂️"}
+             return {"error": "მანქანა არქივში ვერ მოიძებნა 🤷‍♂️"}
 
-        print(f"✅ Found Page: {car_link}")
+        # სრული ლინკის აწყობა
+        if not car_link.startswith("http"):
+            full_link = f"https://bid.cars{car_link}"
+        else:
+            full_link = car_link
 
-        # 2. შევდივართ მანქანის გვერდზე
-        page_response = cffi_requests.get(car_link, impersonate="chrome124")
+        print(f"✅ Found Page: {full_link}")
+
+        # 3. შევდივართ მანქანის გვერდზე
+        page_response = cffi_requests.get(full_link, impersonate="chrome124")
         page_soup = BeautifulSoup(page_response.content, 'html.parser')
 
+        # 4. მონაცემების ამოღება
         data = {
             "title": "უცნობი",
             "images": [],
@@ -63,27 +69,26 @@ def scrape_bidfax(vin):
         h1 = page_soup.find('h1')
         if h1: data['title'] = h1.get_text(strip=True)
 
-        # ფოტოები (Bidfax-ზე არის "full-img" კლასში ან "slider")
+        # ფოტოები (ვეძებთ დიდ სურათებს)
         images = []
-        # ვეძებთ დიდ ფოტოებს
         img_tags = page_soup.find_all('img')
         for img in img_tags:
-            src = img.get('src')
-            if src and "bidfax.info/uploads/posts" in src:
-                # full path-ის აღება (ხანდახან thumbs-ია, ვცვლით full-ზე)
-                full_src = src.replace("thumbs/", "") # Bidfax-ის ლოგიკა შეიძლება განსხვავდებოდეს, მაგრამ ძირითადად პირდაპირ ლინკებია
-                if full_src not in images:
-                    images.append(full_src)
+            src = img.get('src') or img.get('data-src')
+            if src and "media.bid.cars" in src and "small" not in src:
+                # ვასუფთავებთ ლინკს რომ დიდი ზომა მივიღოთ
+                full_size = src.replace("thumbnails/", "").replace("small/", "")
+                if full_size not in images:
+                    images.append(full_size)
         
-        # ვიღებთ პირველ 8 ფოტოს
-        data['images'] = images[:8]
+        # ვიღებთ პირველ 5 ფოტოს
+        data['images'] = images[:5]
 
-        # ინფო (ტექსტიდან ამოღება)
-        full_text = page_soup.get_text()
+        # ტექნიკური ინფო (ტექსტიდან ამოღება)
+        info_block = page_soup.get_text()
         
-        odometer = re.search(r'Mileage[:\s]+(\d+[\d\s]*mi|\d+[\d\s]*km)', full_text, re.IGNORECASE)
-        damage = re.search(r'Primary Damage[:\s]+([A-Za-z\s]+)', full_text, re.IGNORECASE)
-        engine = re.search(r'Engine[:\s]+([0-9\.]+L)', full_text, re.IGNORECASE)
+        odometer = re.search(r'Odometer[:\s]+([\d,]+)', info_block)
+        damage = re.search(r'Primary Damage[:\s]+([A-Za-z\s]+)', info_block)
+        engine = re.search(r'Engine[:\s]+([0-9\.]+L)', info_block)
 
         if odometer: data['info']['odometer'] = odometer.group(1).strip()
         if damage: data['info']['damage'] = damage.group(1).strip()
@@ -99,9 +104,10 @@ def scrape_bidfax(vin):
 def read_root():
     return FileResponse('static/index.html')
 
+# ახალი ენდპოინტი
 @app.post("/check_vin")
 def check_vin_handler(req: VinRequest):
-    result = scrape_bidfax(req.vin)
+    result = scrape_bidcars(req.vin)
     return result
 
 if __name__ == "__main__":
